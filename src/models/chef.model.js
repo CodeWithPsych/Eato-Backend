@@ -1,9 +1,8 @@
-// models/chef.model.js
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
-const SALT_ROUNDS = 10;
+const SALT_ROUNDS = 12;
 
 const chefSchema = new mongoose.Schema(
   {
@@ -13,17 +12,12 @@ const chefSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-
     name: { type: String, required: true, trim: true },
-
-    // Owner creates this (used in owner profile list)
     username: { type: String, required: true, trim: true, lowercase: true },
-
-    // Chef login screen asks "Kitchen ID" (can be same as username)
+    // Kitchen ID shown on the login screen — defaults to username
     kitchenId: { type: String, trim: true, lowercase: true },
-
     passwordHash: { type: String, required: true, select: false },
-
+    refreshToken: { type: String, default: null, select: false },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
@@ -31,19 +25,23 @@ const chefSchema = new mongoose.Schema(
 
 chefSchema.index({ restaurantId: 1, username: 1 }, { unique: true });
 
+// Auto-fill kitchenId = username if not provided
 chefSchema.pre("validate", function (next) {
   if (!this.kitchenId) this.kitchenId = this.username;
   next();
 });
 
-// password is set/reset by owner only
-chefSchema.methods.setPasswordByOwner = async function (plainPassword) {
-  this.passwordHash = await bcrypt.hash(plainPassword, SALT_ROUNDS);
+// ── Password (set by owner only) ──────────────────────────────
+
+chefSchema.methods.setPassword = async function (plain) {
+  this.passwordHash = await bcrypt.hash(plain, SALT_ROUNDS);
 };
 
-chefSchema.methods.comparePassword = async function (candidatePassword) {
-  return bcrypt.compare(candidatePassword, this.passwordHash);
+chefSchema.methods.comparePassword = async function (candidate) {
+  return bcrypt.compare(candidate, this.passwordHash);
 };
+
+// ── JWT ───────────────────────────────────────────────────────
 
 chefSchema.methods.generateAccessToken = function () {
   return jwt.sign(
@@ -54,20 +52,15 @@ chefSchema.methods.generateAccessToken = function () {
       kitchenId: this.kitchenId,
     },
     process.env.CHEF_ACCESS_SECRET,
-    { expiresIn: process.env.CHEF_ACCESS_EXPIRES_IN || "15m" }
+    { expiresIn: process.env.CHEF_ACCESS_EXPIRES_IN || "8h" }
   );
 };
 
 chefSchema.methods.generateRefreshToken = function () {
   return jwt.sign(
-    {
-      sub: this._id.toString(),
-      role: "chef",
-      restaurantId: this.restaurantId.toString(),
-      kitchenId: this.kitchenId,
-    },
+    { sub: this._id.toString(), role: "chef", restaurantId: this.restaurantId.toString() },
     process.env.CHEF_REFRESH_SECRET,
-    { expiresIn: process.env.CHEF_REFRESH_EXPIRES_IN || "30d" }
+    { expiresIn: process.env.CHEF_REFRESH_EXPIRES_IN || "7d" }
   );
 };
 

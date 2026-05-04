@@ -1,32 +1,27 @@
-// models/customer.model.js
 import mongoose from "mongoose";
 
 /**
- * Customer has no login in your frontend.
- * Create a guest customer session tied to restaurant + table after QR scan.
+ * Customers are anonymous — created when they scan a QR code.
+ * No login required. Each scan = new or reused session.
  */
 const customerSchema = new mongoose.Schema(
   {
-    name: { type: String, trim: true, default: "" },
-    phone: { type: String, trim: true, default: "" },
-
-    // useful to track a guest session without auth
-    guestTag: { type: String, trim: true, default: "", index: true },
-
     restaurantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Restaurant",
       required: true,
       index: true,
     },
-
     tableNumber: { type: Number, required: true, min: 1, index: true },
-
+    // Optional — if customer wants to add name for personalised service
+    name: { type: String, trim: true, default: "" },
+    // Random tag to correlate session across requests without login
+    sessionTag: { type: String, required: true, index: true },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
 
-customerSchema.index({ restaurantId: 1, tableNumber: 1, createdAt: -1 });
+customerSchema.index({ restaurantId: 1, tableNumber: 1, sessionTag: 1 });
 
 export default mongoose.model("Customer", customerSchema);
