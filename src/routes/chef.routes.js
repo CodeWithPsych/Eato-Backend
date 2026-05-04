@@ -24,7 +24,6 @@ router.post("/refresh-token", refreshChefAccessToken);
 router.post("/logout", verifyChefAccess, chefLogout);
 router.get("/me", verifyChefAccess, getChefMe);
 
-// Kitchen order management
 router.get("/orders", verifyChefAccess, getKitchenOrders);
 router.patch("/orders/:orderId/accept", verifyChefAccess, acceptOrder);
 router.patch("/orders/:orderId/reject", verifyChefAccess, rejectOrder);

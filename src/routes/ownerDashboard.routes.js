@@ -19,30 +19,29 @@ import {
 } from "../controllers/ownerDashboard.controller.js";
 
 const router = Router();
-router.use(verifyOwnerAccess);
 
-// Dashboard
-router.get("/stats", getDashboardStats);
+// ── Dashboard ──────────────────────────────────────────────────
+router.get("/stats",     verifyOwnerAccess, getDashboardStats);
 
-// Menu
-router.get("/menu", getMenu);
-router.post("/menu", upload.single("image"), addMenuItem);
-router.patch("/menu/:itemId", upload.single("image"), updateMenuItem);
-router.delete("/menu/:itemId", deleteMenuItem);
+// ── Menu ───────────────────────────────────────────────────────
+router.get("/menu",                verifyOwnerAccess, getMenu);
+router.post("/menu",               verifyOwnerAccess, upload.single("image"), addMenuItem);
+router.patch("/menu/:itemId",      verifyOwnerAccess, upload.single("image"), updateMenuItem);
+router.delete("/menu/:itemId",     verifyOwnerAccess, deleteMenuItem);
 
-// Categories
-router.get("/categories", getCategories);
-router.post("/categories", upload.single("image"), addCategory);
-router.delete("/categories/:categoryId", deleteCategory);
+// ── Categories ─────────────────────────────────────────────────
+router.get("/categories",              verifyOwnerAccess, getCategories);
+router.post("/categories",             verifyOwnerAccess, upload.single("image"), addCategory);
+router.delete("/categories/:categoryId", verifyOwnerAccess, deleteCategory);
 
-// Chefs
-router.get("/chefs", getChefs);
-router.post("/chefs", createChef);
-router.patch("/chefs/:chefId", updateChef);
-router.delete("/chefs/:chefId", deleteChef);
+// ── Chefs ──────────────────────────────────────────────────────
+router.get("/chefs",          verifyOwnerAccess, getChefs);
+router.post("/chefs",         verifyOwnerAccess, createChef);
+router.patch("/chefs/:chefId", verifyOwnerAccess, updateChef);
+router.delete("/chefs/:chefId", verifyOwnerAccess, deleteChef);
 
-// Orders
-router.get("/orders", getRestaurantOrders);
-router.patch("/orders/:orderId/status", updateOrderStatus);
+// ── Orders ─────────────────────────────────────────────────────
+router.get("/orders",                    verifyOwnerAccess, getRestaurantOrders);
+router.patch("/orders/:orderId/status",  verifyOwnerAccess, updateOrderStatus);
 
 export default router;
