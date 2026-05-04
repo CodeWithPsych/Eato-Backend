@@ -26,9 +26,9 @@ const chefSchema = new mongoose.Schema(
 chefSchema.index({ restaurantId: 1, username: 1 }, { unique: true });
 
 // Auto-fill kitchenId = username if not provided
-chefSchema.pre("validate", function (next) {
+// AFTER (fixed)
+chefSchema.pre("validate", async function () {
   if (!this.kitchenId) this.kitchenId = this.username;
-  next();
 });
 
 // ── Password (set by owner only) ──────────────────────────────
