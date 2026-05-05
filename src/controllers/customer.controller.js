@@ -7,21 +7,89 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ORDER_STATUS } from "../constants.js";
 
+// ── QR token helpers ──────────────────────────────────────────
+
+/**
+ * Decode and verify a QR token produced by restaurantSetup.controller.js.
+ *
+ * Token format:  <base64url(JSON payload)>.<hmac8chars>
+ *
+ * Payload shape: { restaurantId, tableNumber, wifiPassword }
+ *
+ * Returns the decoded payload or throws ApiError on invalid/tampered token.
+ */
+const decodeQrToken = (token) => {
+  if (!token || typeof token !== "string") {
+    throw new ApiError(400, "Invalid QR token");
+  }
+
+  const parts = token.split(".");
+  if (parts.length !== 2) {
+    throw new ApiError(400, "Malformed QR token");
+  }
+
+  const [payloadB64, receivedHmac] = parts;
+
+  // Verify HMAC to catch tampered tokens
+  const expectedHmac = crypto
+    .createHmac("sha256", process.env.QR_HMAC_SECRET || "eato-qr-secret")
+    .update(payloadB64)
+    .digest("hex")
+    .slice(0, 8);
+
+  if (receivedHmac !== expectedHmac) {
+    throw new ApiError(400, "Invalid QR token — signature mismatch");
+  }
+
+  try {
+    const json = Buffer.from(payloadB64, "base64url").toString("utf8");
+    const payload = JSON.parse(json);
+
+    if (!payload.restaurantId || payload.tableNumber === undefined) {
+      throw new Error("Missing required fields");
+    }
+
+    return payload; // { restaurantId, tableNumber, wifiPassword }
+  } catch {
+    throw new ApiError(400, "Corrupted QR token payload");
+  }
+};
+
 // ── QR Scan → create guest session ───────────────────────────
+//
 // Called immediately after the customer scans the table QR code.
-// Returns restaurantId + tableNumber + sessionTag for subsequent calls.
+//
+// The response includes:
+//   - wifiSsid / wifiPassword  so the app can auto-connect the customer
+//   - restaurantId / tableNumber for all subsequent API calls
+//   - sessionTag to correlate the guest session
 
 export const scanQr = asyncHandler(async (req, res) => {
   const { qrToken } = req.body;
   if (!qrToken?.trim()) throw new ApiError(400, "qrToken is required");
 
-  const restaurant = await Restaurant.findOne({ "tables.qrToken": qrToken, isPublished: true });
-  if (!restaurant) throw new ApiError(404, "Invalid or inactive QR code");
+  // ── 1. Decode & verify the token ─────────────────────────
+  const decoded = decodeQrToken(qrToken.trim());
+  const { restaurantId: encodedRestaurantId, tableNumber: encodedTableNumber, wifiPassword } = decoded;
 
-  const table = restaurant.tables.find((t) => t.qrToken === qrToken);
-  if (!table || !table.isActive) throw new ApiError(400, "Table is currently inactive");
+  // ── 2. Confirm the token still exists in the database ────
+  //       (catches regenerated / revoked tokens)
+  const restaurant = await Restaurant.findOne({
+    _id: encodedRestaurantId,
+    "tables.qrToken": qrToken.trim(),
+    isPublished: true,
+  });
 
-  // Create a guest session tag (unique per scan)
+  if (!restaurant) {
+    throw new ApiError(404, "Invalid or inactive QR code — please scan again");
+  }
+
+  const table = restaurant.tables.find((t) => t.qrToken === qrToken.trim());
+  if (!table || !table.isActive) {
+    throw new ApiError(400, "This table is currently inactive");
+  }
+
+  // ── 3. Create a guest session ─────────────────────────────
   const sessionTag = crypto.randomBytes(16).toString("hex");
   const customer = await Customer.create({
     restaurantId: restaurant._id,
@@ -36,6 +104,12 @@ export const scanQr = asyncHandler(async (req, res) => {
       restaurantId: restaurant._id,
       restaurantName: restaurant.name,
       tableNumber: table.tableNumber,
+      // WiFi info — the app should prompt the customer to connect
+      wifi: {
+        ssid: restaurant.wifi?.ssid ?? "",
+        password: wifiPassword ?? "",          // decoded from the QR token
+        securityType: restaurant.wifi?.securityType ?? "WPA2",
+      },
     }, "Session started")
   );
 });
@@ -115,11 +189,12 @@ export const placeOrder = asyncHandler(async (req, res) => {
   // Validate + enrich items against the live menu
   const enrichedItems = [];
   for (const reqItem of items) {
-    const menuItem = restaurant.menu.find((m) => m._id.toString() === reqItem.itemId || m._id.toString() === String(reqItem.itemId));
+    const menuItem = restaurant.menu.find(
+      (m) => m._id.toString() === reqItem.itemId || m._id.toString() === String(reqItem.itemId)
+    );
     if (!menuItem) throw new ApiError(400, `Menu item ${reqItem.itemId} not found`);
     if (!menuItem.isAvailable) throw new ApiError(400, `${menuItem.name} is currently unavailable`);
 
-    const custPrice = (reqItem.customizations || []).reduce((s, c) => s + (c.price ?? 0), 0);
     enrichedItems.push({
       itemId: menuItem._id.toString(),
       name: menuItem.name,

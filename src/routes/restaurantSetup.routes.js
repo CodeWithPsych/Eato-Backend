@@ -8,11 +8,14 @@ import {
   setupStep3,
   setupStep4,
   completeSetup,
+  updateWifi,
 } from "../controllers/restaurantSetup.controller.js";
 
 const router = Router();
 
 router.get("/progress", verifyOwnerAccess, getSetupProgress);
+
+// Step 1 now also accepts wifiSsid / wifiPassword / wifiSecurity in the body
 router.post("/step-1", verifyOwnerAccess, setupStep1);
 
 router.post(
@@ -35,5 +38,8 @@ router.post(
 
 router.post("/step-4", verifyOwnerAccess, setupStep4);
 router.post("/complete", verifyOwnerAccess, completeSetup);
+
+// Standalone WiFi update — regenerates all QR tokens automatically
+router.patch("/wifi", verifyOwnerAccess, updateWifi);
 
 export default router;

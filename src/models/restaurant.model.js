@@ -33,10 +33,27 @@ const categorySchema = new mongoose.Schema(
 const tableSchema = new mongoose.Schema(
   {
     tableNumber: { type: Number, required: true, min: 1 },
+    // qrToken now stores a base64-encoded JSON payload:
+    // { restaurantId, tableNumber, wifiPassword }
     qrToken: { type: String, required: true },
     isActive: { type: Boolean, default: true },
   },
   { _id: true }
+);
+
+// ── WiFi sub-schema ───────────────────────────────────────────
+
+const wifiSchema = new mongoose.Schema(
+  {
+    ssid: { type: String, default: "", trim: true },         // Network name
+    password: { type: String, default: "", trim: true },     // WiFi password
+    securityType: {
+      type: String,
+      enum: ["WPA2", "WPA", "WEP", "open"],
+      default: "WPA2",
+    },
+  },
+  { _id: false }
 );
 
 // ── Main Schema ───────────────────────────────────────────────
@@ -57,6 +74,9 @@ const restaurantSchema = new mongoose.Schema(
     // logo / banner (optional, Cloudinary)
     logo: { type: String, default: "" },
     logoPublicId: { type: String, default: "" },
+
+    // ── WiFi credentials (used to embed in QR codes) ──────────
+    wifi: { type: wifiSchema, default: () => ({}) },
 
     // Category objects (with optional image)
     categories: [categorySchema],
