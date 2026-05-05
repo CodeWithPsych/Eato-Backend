@@ -29,9 +29,9 @@ chefSchema.index({ restaurantId: 1, username: 1 }, { unique: true });
 chefSchema.index({ kitchenId: 1 }, { unique: true, sparse: true });
 
 // Auto-fill kitchenId = username if not provided
-chefSchema.pre("validate", function (next) {
+chefSchema.pre("validate", function () {   // ← no "next" parameter
   if (!this.kitchenId) this.kitchenId = this.username;
-  next();
+  // just return — Mongoose 6+ supports promise-based hooks
 });
 
 // ── Password ──────────────────────────────────────────────────
