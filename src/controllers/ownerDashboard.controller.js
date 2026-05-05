@@ -196,7 +196,7 @@ export const createChef = asyncHandler(async (req, res) => {
   }
   if (password.length < 6) throw new ApiError(400, "Chef password must be at least 6 characters");
 
-  const exists = await Chef.findOne({ restaurantId: restaurant._id, username: username.toLowerCase().trim() });
+  const exists = await Chef.findOne({ username: username.toLowerCase().trim() });
   if (exists) throw new ApiError(409, "Username already taken");
 
   const chef = new Chef({

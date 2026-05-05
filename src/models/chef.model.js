@@ -14,7 +14,6 @@ const chefSchema = new mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     username: { type: String, required: true, trim: true, lowercase: true },
-    // Kitchen ID shown on the login screen — defaults to username
     kitchenId: { type: String, trim: true, lowercase: true },
     passwordHash: { type: String, required: true, select: false },
     refreshToken: { type: String, default: null, select: false },
@@ -23,15 +22,19 @@ const chefSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Per-restaurant unique username (owner can't create duplicate usernames in same restaurant)
 chefSchema.index({ restaurantId: 1, username: 1 }, { unique: true });
 
+// Globally unique kitchenId — so chefs can log in without specifying a restaurant
+chefSchema.index({ kitchenId: 1 }, { unique: true, sparse: true });
+
 // Auto-fill kitchenId = username if not provided
-// AFTER (fixed)
-chefSchema.pre("validate", async function () {
+chefSchema.pre("validate", function (next) {
   if (!this.kitchenId) this.kitchenId = this.username;
+  next();
 });
 
-// ── Password (set by owner only) ──────────────────────────────
+// ── Password ──────────────────────────────────────────────────
 
 chefSchema.methods.setPassword = async function (plain) {
   this.passwordHash = await bcrypt.hash(plain, SALT_ROUNDS);
@@ -58,7 +61,11 @@ chefSchema.methods.generateAccessToken = function () {
 
 chefSchema.methods.generateRefreshToken = function () {
   return jwt.sign(
-    { sub: this._id.toString(), role: "chef", restaurantId: this.restaurantId.toString() },
+    {
+      sub: this._id.toString(),
+      role: "chef",
+      restaurantId: this.restaurantId.toString(),
+    },
     process.env.CHEF_REFRESH_SECRET,
     { expiresIn: process.env.CHEF_REFRESH_EXPIRES_IN || "7d" }
   );

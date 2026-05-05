@@ -24,15 +24,17 @@ const setRefreshCookie = (res, token) =>
 // Uses kitchenId + password
 
 export const chefLogin = asyncHandler(async (req, res) => {
-  const { kitchenId, password, restaurantId } = req.body;
+  const { kitchenId, password } = req.body;  // remove restaurantId here
   if (!kitchenId?.trim() || !password) {
     throw new ApiError(400, "kitchenId and password are required");
   }
 
-  const query = { kitchenId: kitchenId.toLowerCase().trim(), isActive: true };
-  if (restaurantId) query.restaurantId = restaurantId;
+  // No restaurantId in query — kitchenId is now globally unique
+  const chef = await Chef.findOne({
+    kitchenId: kitchenId.toLowerCase().trim(),
+    isActive: true,
+  }).select("+passwordHash");
 
-  const chef = await Chef.findOne(query).select("+passwordHash");
   if (!chef) throw new ApiError(401, "Invalid Kitchen ID or password");
 
   const ok = await chef.comparePassword(password);
@@ -52,7 +54,6 @@ export const chefLogin = asyncHandler(async (req, res) => {
     }, "Kitchen login successful")
   );
 });
-
 // ── Refresh access token ──────────────────────────────────────
 
 export const refreshChefAccessToken = asyncHandler(async (req, res) => {
