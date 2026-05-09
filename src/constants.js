@@ -1,4 +1,4 @@
-export const DB_NAME = "eatodb"
+export const DB_NAME = "eatodb";
 
 export const ROLES = Object.freeze({
   OWNER: "owner",
@@ -32,3 +32,6 @@ export const COOKIE_OPTIONS = Object.freeze({
   secure: process.env.NODE_ENV === "production",
   sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
 });
+
+
+export const QR_VERSION = "1";

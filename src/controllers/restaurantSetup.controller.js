@@ -6,6 +6,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import { uploadToCloudinary, deleteFromCloudinary } from "../config/cloudinary.js";
 import { CLOUDINARY_FOLDERS } from "../constants.js";
+import { encodeQrPayload } from "../utils/qr.js";
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -15,31 +16,29 @@ const ownerIdFromAuth = (req) => {
 };
 
 /**
- * Build the QR token for a table.
- *
- * The token is a base64url-encoded JSON payload containing the three pieces
- * of data a customer needs when they scan the code:
- *   { restaurantId, tableNumber, wifiPassword }
- *
- * A short HMAC suffix is appended so forged tokens can be detected on scan.
- *
- * Format:  <base64url(payload)>.<hmac8chars>
+ * Create a raw 32-char hex token — this is the secret stored in the DB
+ * and embedded inside the QR payload. It is NOT the full QR string.
  */
-const createQrToken = (restaurantId, tableNumber, wifiPassword = "") => {
-  const payload = Buffer.from(
-    JSON.stringify({ restaurantId: String(restaurantId), tableNumber, wifiPassword })
-  ).toString("base64url");
+const createRawToken = () =>
+  crypto.randomBytes(16).toString("hex"); // 32-char hex
 
-  // 8-char HMAC for basic tamper detection (not a security boundary — real
-  // verification happens server-side by looking up the token in the DB)
-  const hmac = crypto
-    .createHmac("sha256", process.env.QR_HMAC_SECRET || "eato-qr-secret")
-    .update(payload)
-    .digest("hex")
-    .slice(0, 8);
-
-  return `${payload}.${hmac}`;
-};
+/**
+ * Build the full QR payload string (base64url encoded) that gets printed on QR codes.
+ * If the restaurant has WiFi credentials configured, they are embedded here.
+ */
+const buildQrPayload = (restaurant, tableNumber, rawToken) =>
+  encodeQrPayload({
+    restaurantId: restaurant._id.toString(),
+    tableNumber,
+    token: rawToken,
+    wifi: restaurant.wifiSsid
+      ? {
+          ssid: restaurant.wifiSsid,
+          password: restaurant.wifiPassword ?? "",
+          type: restaurant.wifiType ?? "WPA",
+        }
+      : null,
+  });
 
 /**
  * Find or create the restaurant record tied to this owner.
@@ -70,31 +69,19 @@ export const getSetupProgress = asyncHandler(async (req, res) => {
       restaurantId: restaurant._id,
       name: restaurant.name,
       location: restaurant.location,
-      wifi: {
-        ssid: restaurant.wifi?.ssid ?? "",
-        // Never expose the raw password in list views — send a masked hint
-        passwordSet: !!restaurant.wifi?.password,
-        securityType: restaurant.wifi?.securityType ?? "WPA2",
-      },
       categories: restaurant.categories,
       menu: restaurant.menu,
       tableCount: restaurant.tableCount,
       tables: restaurant.tables,
+      wifiSsid: restaurant.wifiSsid,
       setupStep: restaurant.setupStep,
       setupCompleted: restaurant.setupCompleted,
     }, "Setup progress")
   );
 });
 
-// ── STEP 1 — Restaurant name, location & WiFi credentials ─────
-//
-// Body params:
-//   name          (required)  restaurant display name
-//   location      (optional)  city / address string
-//   wifiSsid      (optional)  WiFi network name (SSID)
-//   wifiPassword  (optional)  WiFi password — stored as-is so it can be
-//                             embedded in QR codes; encrypt at rest if needed
-//   wifiSecurity  (optional)  "WPA2" | "WPA" | "WEP" | "open"  (default WPA2)
+// ── STEP 1 — Restaurant name, location & WiFi ─────────────────
+// Body: { name, location?, wifiSsid?, wifiPassword?, wifiType? }
 
 export const setupStep1 = asyncHandler(async (req, res) => {
   const {
@@ -102,44 +89,25 @@ export const setupStep1 = asyncHandler(async (req, res) => {
     location = "",
     wifiSsid = "",
     wifiPassword = "",
-    wifiSecurity = "WPA2",
+    wifiType = "WPA",
   } = req.body;
 
   if (!name?.trim()) throw new ApiError(400, "Restaurant name is required");
-
-  const validSecurityTypes = ["WPA2", "WPA", "WEP", "open"];
-  if (wifiSecurity && !validSecurityTypes.includes(wifiSecurity)) {
-    throw new ApiError(400, `wifiSecurity must be one of: ${validSecurityTypes.join(", ")}`);
-  }
 
   const { restaurant } = await getOrCreateRestaurant(ownerIdFromAuth(req));
 
   restaurant.name = name.trim();
   restaurant.location = String(location).trim();
 
-  // Update WiFi credentials
-  restaurant.wifi = {
-    ssid: String(wifiSsid).trim(),
-    password: String(wifiPassword).trim(),
-    securityType: wifiSecurity || "WPA2",
-  };
+  // WiFi credentials are optional but stored so they can be embedded in QR codes
+  restaurant.wifiSsid = String(wifiSsid).trim();
+  restaurant.wifiPassword = String(wifiPassword).trim();
+  restaurant.wifiType = ["WPA", "WEP", "nopass"].includes(wifiType) ? wifiType : "WPA";
 
   restaurant.setupStep = Math.max(restaurant.setupStep, 2);
   await restaurant.save();
 
-  return res.status(200).json(
-    new ApiResponse(200, {
-      restaurantId: restaurant._id,
-      name: restaurant.name,
-      location: restaurant.location,
-      wifi: {
-        ssid: restaurant.wifi.ssid,
-        passwordSet: !!restaurant.wifi.password,
-        securityType: restaurant.wifi.securityType,
-      },
-      setupStep: restaurant.setupStep,
-    }, "Step 1 saved")
-  );
+  return res.status(200).json(new ApiResponse(200, restaurant, "Step 1 saved"));
 });
 
 // ── STEP 2 — Categories (with optional image per category) ────
@@ -160,11 +128,9 @@ export const setupStep2 = asyncHandler(async (req, res) => {
 
   const { restaurant } = await getOrCreateRestaurant(ownerIdFromAuth(req));
 
-  // Build a map of uploaded category images indexed by position
   const uploadedImages = {};
   if (req.files && Array.isArray(req.files)) {
     for (const file of req.files) {
-      // file.fieldname expected to be "categoryImage_0", "categoryImage_1", etc.
       const match = file.fieldname.match(/categoryImage_(\d+)/);
       if (match) {
         const idx = parseInt(match[1]);
@@ -174,7 +140,6 @@ export const setupStep2 = asyncHandler(async (req, res) => {
     }
   }
 
-  // Delete old category images from Cloudinary before replacing
   for (const cat of restaurant.categories) {
     if (cat.imagePublicId) await deleteFromCloudinary(cat.imagePublicId);
   }
@@ -211,7 +176,6 @@ export const setupStep3 = asyncHandler(async (req, res) => {
 
   const { restaurant } = await getOrCreateRestaurant(ownerIdFromAuth(req));
 
-  // Upload any new item images (fieldname: menuImage_0, menuImage_1…)
   const uploadedImages = {};
   if (req.files && Array.isArray(req.files)) {
     for (const file of req.files) {
@@ -224,7 +188,6 @@ export const setupStep3 = asyncHandler(async (req, res) => {
     }
   }
 
-  // Delete old item images
   for (const item of restaurant.menu) {
     if (item.imagePublicId) await deleteFromCloudinary(item.imagePublicId);
   }
@@ -249,14 +212,12 @@ export const setupStep3 = asyncHandler(async (req, res) => {
 });
 
 // ── STEP 4 — Tables & QR generation ──────────────────────────
+// Body: { tableCount }
 //
-// Each QR token encodes:
-//   { restaurantId, tableNumber, wifiPassword }
-//
-// The customer app decodes the token after scanning to:
-//   1. Connect to the restaurant WiFi
-//   2. Identify the restaurant
-//   3. Know which table they're sitting at
+// Each table document now stores:
+//   rawToken   — 32-char hex secret (used for DB lookup on scan)
+//   qrPayload  — full base64url string that gets encoded into the physical QR code
+//               (contains restaurantId + tableNumber + rawToken + WiFi creds)
 
 export const setupStep4 = asyncHandler(async (req, res) => {
   const tableCount = Number(req.body.tableCount);
@@ -266,41 +227,57 @@ export const setupStep4 = asyncHandler(async (req, res) => {
 
   const { restaurant } = await getOrCreateRestaurant(ownerIdFromAuth(req));
 
-  // Pull the WiFi password saved in Step 1 (may be empty string if not set)
-  const wifiPassword = restaurant.wifi?.password ?? "";
-
   restaurant.tableCount = tableCount;
-  restaurant.tables = Array.from({ length: tableCount }, (_, i) => ({
-    tableNumber: i + 1,
-    qrToken: createQrToken(restaurant._id.toString(), i + 1, wifiPassword),
-    isActive: true,
-  }));
+  restaurant.tables = Array.from({ length: tableCount }, (_, i) => {
+    const tableNumber = i + 1;
+    const rawToken = createRawToken();
+    const qrPayload = buildQrPayload(restaurant, tableNumber, rawToken);
+
+    return {
+      tableNumber,
+      qrToken: rawToken,      // stored for fast DB lookup
+      qrPayload,              // encode THIS string into the physical QR code
+      isActive: true,
+    };
+  });
+
   restaurant.setupStep = 4;
   await restaurant.save();
-
-  // Return the decoded metadata alongside the raw token so the frontend can
-  // render QR codes and show a human-readable summary per table
-  const tablesWithMeta = restaurant.tables.map((t) => ({
-    tableNumber: t.tableNumber,
-    qrToken: t.qrToken,
-    isActive: t.isActive,
-    // Decoded payload for frontend QR rendering
-    qrPayload: {
-      restaurantId: restaurant._id.toString(),
-      tableNumber: t.tableNumber,
-      wifiSsid: restaurant.wifi?.ssid ?? "",
-      // Intentionally NOT returning wifiPassword here — the raw token already
-      // contains it encoded; the frontend should render the token as a QR code
-    },
-  }));
 
   return res.status(200).json(
     new ApiResponse(200, {
       restaurantId: restaurant._id,
       tableCount: restaurant.tableCount,
-      tables: tablesWithMeta,
-      wifiConfigured: !!wifiPassword,
+      tables: restaurant.tables.map((t) => ({
+        tableNumber: t.tableNumber,
+        isActive: t.isActive,
+        qrPayload: t.qrPayload,   // mobile / print uses this as the QR code content
+        // rawToken intentionally omitted from response (stored in DB only)
+      })),
     }, "Step 4 saved — QR tokens generated")
+  );
+});
+
+// ── Regenerate QR codes for a single table (e.g. after WiFi password change) ──
+// PATCH /setup/tables/:tableNumber/regenerate-qr
+
+export const regenerateTableQr = asyncHandler(async (req, res) => {
+  const tableNumber = Number(req.params.tableNumber);
+  const { restaurant } = await getOrCreateRestaurant(ownerIdFromAuth(req));
+
+  const table = restaurant.tables.find((t) => t.tableNumber === tableNumber);
+  if (!table) throw new ApiError(404, `Table ${tableNumber} not found`);
+
+  const rawToken = createRawToken();
+  table.qrToken = rawToken;
+  table.qrPayload = buildQrPayload(restaurant, tableNumber, rawToken);
+  await restaurant.save();
+
+  return res.status(200).json(
+    new ApiResponse(200, {
+      tableNumber: table.tableNumber,
+      qrPayload: table.qrPayload,
+    }, "QR code regenerated")
   );
 });
 
@@ -322,56 +299,5 @@ export const completeSetup = asyncHandler(async (req, res) => {
 
   return res.status(200).json(
     new ApiResponse(200, { restaurantId: restaurant._id, setupCompleted: true }, "Restaurant is live!")
-  );
-});
-
-// ── UPDATE WiFi credentials (standalone endpoint) ─────────────
-// Useful post-setup when the restaurant changes its WiFi password.
-// Automatically regenerates all QR tokens.
-
-export const updateWifi = asyncHandler(async (req, res) => {
-  const { wifiSsid, wifiPassword, wifiSecurity = "WPA2" } = req.body;
-
-  if (wifiSsid === undefined && wifiPassword === undefined) {
-    throw new ApiError(400, "Provide at least wifiSsid or wifiPassword to update");
-  }
-
-  const validSecurityTypes = ["WPA2", "WPA", "WEP", "open"];
-  if (wifiSecurity && !validSecurityTypes.includes(wifiSecurity)) {
-    throw new ApiError(400, `wifiSecurity must be one of: ${validSecurityTypes.join(", ")}`);
-  }
-
-  const { restaurant } = await getOrCreateRestaurant(ownerIdFromAuth(req));
-
-  // Merge — only overwrite fields that were supplied
-  restaurant.wifi = {
-    ssid: wifiSsid !== undefined ? String(wifiSsid).trim() : (restaurant.wifi?.ssid ?? ""),
-    password: wifiPassword !== undefined ? String(wifiPassword).trim() : (restaurant.wifi?.password ?? ""),
-    securityType: wifiSecurity || restaurant.wifi?.securityType || "WPA2",
-  };
-
-  // Regenerate all QR tokens so they carry the new password
-  if (restaurant.tables?.length) {
-    restaurant.tables = restaurant.tables.map((t) => ({
-      ...t.toObject(),
-      qrToken: createQrToken(
-        restaurant._id.toString(),
-        t.tableNumber,
-        restaurant.wifi.password
-      ),
-    }));
-  }
-
-  await restaurant.save();
-
-  return res.status(200).json(
-    new ApiResponse(200, {
-      wifi: {
-        ssid: restaurant.wifi.ssid,
-        passwordSet: !!restaurant.wifi.password,
-        securityType: restaurant.wifi.securityType,
-      },
-      tablesRegenerated: restaurant.tables.length,
-    }, "WiFi updated — all QR tokens regenerated")
   );
 });

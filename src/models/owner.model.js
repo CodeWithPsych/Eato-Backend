@@ -21,11 +21,9 @@ const ownerSchema = new mongoose.Schema(
 
     isVerified: { type: Boolean, default: false },
 
-    // OTP for signup verification
     otp: { type: String, default: null, select: false },
     otpExpiresAt: { type: Date, default: null, select: false },
 
-    // Refresh token stored server-side (invalidated on logout)
     refreshToken: { type: String, default: null, select: false },
 
     restaurantId: {
@@ -69,9 +67,14 @@ ownerSchema.methods.clearOtp = function () {
 
 ownerSchema.methods.generateAccessToken = function () {
   return jwt.sign(
-    { sub: this._id.toString(), role: "owner", restaurantId: this.restaurantId?.toString() ?? null },
+    {
+      sub: this._id.toString(),
+      role: "owner",
+      restaurantId: this.restaurantId?.toString() ?? null,
+    },
     process.env.OWNER_ACCESS_SECRET,
-    { expiresIn: process.env.OWNER_ACCESS_EXPIRES_IN || "15m" }
+    // Default is 12h — overridable via .env
+    { expiresIn: process.env.OWNER_ACCESS_EXPIRES_IN || "12h" }
   );
 };
 

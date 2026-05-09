@@ -22,13 +22,9 @@ const chefSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Per-restaurant unique username (owner can't create duplicate usernames in same restaurant)
 chefSchema.index({ restaurantId: 1, username: 1 }, { unique: true });
-
-// Globally unique kitchenId — so chefs can log in without specifying a restaurant
 chefSchema.index({ kitchenId: 1 }, { unique: true, sparse: true });
 
-// Auto-fill kitchenId = username if not provided
 chefSchema.pre("validate", function () {   // ← no "next" parameter
   if (!this.kitchenId) this.kitchenId = this.username;
   // just return — Mongoose 6+ supports promise-based hooks
@@ -55,7 +51,8 @@ chefSchema.methods.generateAccessToken = function () {
       kitchenId: this.kitchenId,
     },
     process.env.CHEF_ACCESS_SECRET,
-    { expiresIn: process.env.CHEF_ACCESS_EXPIRES_IN || "8h" }
+    // Default is 12h — overridable via .env
+    { expiresIn: process.env.CHEF_ACCESS_EXPIRES_IN || "12h" }
   );
 };
 
