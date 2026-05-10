@@ -97,62 +97,67 @@ export const getMenu = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, menu, "Menu fetched"));
 });
 
+// ── ADD MENU ITEM ─────────────────────────────────────────────
 export const addMenuItem = asyncHandler(async (req, res) => {
   const restaurant = await getOwnedRestaurant(req);
-  const { name, category, description = "", price } = req.body;
-
+  const { name, category, description = "", price, emoji = "" } = req.body;
+ 
   if (!name?.trim() || !category?.trim() || price === undefined) {
     throw new ApiError(400, "name, category and price are required");
   }
-
+ 
   let image = "", imagePublicId = "";
   if (req.file) {
     const result = await uploadToCloudinary(req.file.path, CLOUDINARY_FOLDERS.MENU_ITEMS);
     image = result.url;
     imagePublicId = result.publicId;
   }
-
+ 
   const newItem = {
     _id: itemId(),
     name: name.trim(),
     category: category.trim(),
     description: description.trim(),
     price: Number(price),
+    emoji: emoji.trim(),        // ← NEW
     image,
     imagePublicId,
     isAvailable: true,
     isFeatured: false,
   };
-
+ 
   restaurant.menu.push(newItem);
   await restaurant.save();
-
+ 
   return res.status(201).json(new ApiResponse(201, newItem, "Menu item added"));
 });
-
+ 
+// ── UPDATE MENU ITEM ──────────────────────────────────────────
 export const updateMenuItem = asyncHandler(async (req, res) => {
   const restaurant = await getOwnedRestaurant(req);
   const item = restaurant.menu.id(req.params.itemId);
   if (!item) throw new ApiError(404, "Menu item not found");
-
-  const { name, category, description, price, isAvailable, isFeatured } = req.body;
+ 
+  const { name, category, description, price, isAvailable, isFeatured, emoji } = req.body;
   if (name        !== undefined) item.name        = name.trim();
   if (category    !== undefined) item.category    = category.trim();
   if (description !== undefined) item.description = description.trim();
   if (price       !== undefined) item.price       = Number(price);
   if (isAvailable !== undefined) item.isAvailable = Boolean(isAvailable);
   if (isFeatured  !== undefined) item.isFeatured  = Boolean(isFeatured);
-
+  if (emoji       !== undefined) item.emoji       = emoji.trim();  // ← NEW
+ 
   if (req.file) {
     if (item.imagePublicId) await deleteFromCloudinary(item.imagePublicId);
     const result = await uploadToCloudinary(req.file.path, CLOUDINARY_FOLDERS.MENU_ITEMS);
-    item.image          = result.url;
-    item.imagePublicId  = result.publicId;
+    item.image         = result.url;
+    item.imagePublicId = result.publicId;
   }
-
+ 
   await restaurant.save();
   return res.status(200).json(new ApiResponse(200, item, "Menu item updated"));
 });
+ 
 
 export const deleteMenuItem = asyncHandler(async (req, res) => {
   const restaurant = await getOwnedRestaurant(req);

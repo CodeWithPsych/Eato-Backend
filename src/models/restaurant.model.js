@@ -9,6 +9,7 @@ const menuItemSchema = new mongoose.Schema(
     description: { type: String, default: "", trim: true },
     image: { type: String, default: "" },
     imagePublicId: { type: String, default: "" },
+    emoji: { type: String, default: "", trim: true },   // ← NEW
     price: { type: Number, required: true, min: 0 },
     isAvailable: { type: Boolean, default: true },
     isFeatured: { type: Boolean, default: false },
