@@ -6,6 +6,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import { COOKIE_OPTIONS } from "../constants.js";
 import logger from "../utils/logger.js";
+import { sendOtpEmail } from "../utils/mailer.js";
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -57,10 +58,14 @@ export const register = asyncHandler(async (req, res) => {
   owner.setOtp(code, 10);
   await owner.save();
 
-  // In production wire this to your email provider (Nodemailer, Resend, etc.)
-  if (process.env.NODE_ENV !== "production") {
-    logger.info(`[DEV OTP] ${owner.email} → ${code}`);
-  }
+try {
+  await sendOtpEmail(owner.email, code);
+} catch (mailErr) {
+  logger.error(`[MAILER] Failed to send OTP to ${owner.email}: ${mailErr.message}`);
+}
+if (process.env.NODE_ENV !== "production") {
+  logger.info(`[DEV OTP] ${owner.email} → ${code}`);
+}
 
   return res.status(201).json(
     new ApiResponse(201, { ownerId: owner._id, email: owner.email }, "Registered — OTP sent")
@@ -81,9 +86,14 @@ export const resendOtp = asyncHandler(async (req, res) => {
   owner.setOtp(code, 10);
   await owner.save({ validateBeforeSave: false });
 
-  if (process.env.NODE_ENV !== "production") {
-    logger.info(`[DEV OTP resend] ${owner.email} → ${code}`);
-  }
+try {
+  await sendOtpEmail(owner.email, code);
+} catch (mailErr) {
+  logger.error(`[MAILER] Failed to resend OTP to ${owner.email}: ${mailErr.message}`);
+}
+if (process.env.NODE_ENV !== "production") {
+  logger.info(`[DEV OTP resend] ${owner.email} → ${code}`);
+}
 
   return res.status(200).json(new ApiResponse(200, {}, "OTP resent"));
 });
