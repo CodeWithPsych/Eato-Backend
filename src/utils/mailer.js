@@ -4,21 +4,26 @@ import logger from "./logger.js";
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT) || 587,
-  secure: process.env.SMTP_SECURE === "true", // true for port 465
+  secure: process.env.SMTP_SECURE === "true",
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 });
 
-/**
- * Send a 6-digit OTP email to the owner.
- * @param {string} to    - recipient email
- * @param {string} code  - 6-digit OTP
- */
+transporter.verify((err, success) => {
+  if (err) {
+    logger.error(`[MAILER] Connection FAILED: ${err.message}`);
+  } else {
+    logger.info(`[MAILER] ✅ SMTP ready`);
+  }
+});
+
 export const sendOtpEmail = async (to, code) => {
+  logger.info(`[MAILER] Sending OTP to ${to}`);
+
   const info = await transporter.sendMail({
-    from: `"Eato" <${process.env.SMTP_FROM ?? process.env.SMTP_USER}>`,
+    from: process.env.SMTP_FROM,
     to,
     subject: "Your Eato Verification Code",
     text: `Your OTP is: ${code}\n\nThis code expires in 10 minutes. Do not share it with anyone.`,
@@ -34,5 +39,6 @@ export const sendOtpEmail = async (to, code) => {
     `,
   });
 
-  logger.info(`[MAILER] OTP sent to ${to} — messageId: ${info.messageId}`);
+  logger.info(`[MAILER] ✅ OTP sent to ${to} — messageId: ${info.messageId}`);
+  return info;
 };
