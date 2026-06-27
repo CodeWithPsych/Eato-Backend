@@ -7,7 +7,7 @@ export const sendOtpEmail = async (to, code) => {
   logger.info(`[MAILER] Sending OTP to ${to}`);
 
   const { data, error } = await resend.emails.send({
-    from: "Eato <onboarding@resend.dev>",
+    from: "Eato <otp@eatorestaurant.com>",
     to: [to],
     subject: "Your Eato Verification Code",
     html: `
