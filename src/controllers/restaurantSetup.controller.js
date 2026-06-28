@@ -15,17 +15,9 @@ const ownerIdFromAuth = (req) => {
   return req.user.sub;
 };
 
-/**
- * Create a raw 32-char hex token — this is the secret stored in the DB
- * and embedded inside the QR payload. It is NOT the full QR string.
- */
 const createRawToken = () =>
   crypto.randomBytes(16).toString("hex"); // 32-char hex
 
-/**
- * Build the full QR payload string (base64url encoded) that gets printed on QR codes.
- * If the restaurant has WiFi credentials configured, they are embedded here.
- */
 const buildQrPayload = (restaurant, tableNumber, rawToken) =>
   encodeQrPayload({
     restaurantId: restaurant._id.toString(),
@@ -40,9 +32,6 @@ const buildQrPayload = (restaurant, tableNumber, rawToken) =>
       : null,
   });
 
-/**
- * Find or create the restaurant record tied to this owner.
- */
 const getOrCreateRestaurant = async (ownerId) => {
   const owner = await Owner.findById(ownerId);
   if (!owner) throw new ApiError(404, "Owner not found");
@@ -84,25 +73,19 @@ export const getSetupProgress = asyncHandler(async (req, res) => {
 // Body: { name, location?, wifiSsid?, wifiPassword?, wifiType? }
 
 export const setupStep1 = asyncHandler(async (req, res) => {
-  const {
-    name,
-    location = "",
-    wifiSsid = "",
-    wifiPassword = "",
-    wifiType = "WPA",
-  } = req.body;
+  const { name, location, wifiSsid, wifiPassword, wifiType, lat, lng } = req.body;
 
   if (!name?.trim()) throw new ApiError(400, "Restaurant name is required");
 
   const { restaurant } = await getOrCreateRestaurant(ownerIdFromAuth(req));
 
-  restaurant.name = name.trim();
-  restaurant.location = String(location).trim();
-
-  // WiFi credentials are optional but stored so they can be embedded in QR codes
-  restaurant.wifiSsid = String(wifiSsid).trim();
-  restaurant.wifiPassword = String(wifiPassword).trim();
-  restaurant.wifiType = ["WPA", "WEP", "nopass"].includes(wifiType) ? wifiType : "WPA";
+restaurant.name = name.trim();
+restaurant.location = String(location).trim();
+restaurant.wifiSsid = String(wifiSsid).trim();
+restaurant.wifiPassword = String(wifiPassword).trim();
+restaurant.wifiType = ["WPA", "WEP", "nopass"].includes(wifiType) ? wifiType : "WPA";
+if (lat !== undefined) restaurant.lat = Number(lat);
+if (lng !== undefined) restaurant.lng = Number(lng);
 
   restaurant.setupStep = Math.max(restaurant.setupStep, 2);
   await restaurant.save();

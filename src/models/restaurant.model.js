@@ -15,6 +15,8 @@ const menuItemSchema = new mongoose.Schema(
     isFeatured: { type: Boolean, default: false },
     rating: { type: Number, default: 0, min: 0, max: 5 },
     reviewsCount: { type: Number, default: 0 },
+    lat: { type: Number, default: null },
+lng: { type: Number, default: null },
   },
   { timestamps: true }
 );
